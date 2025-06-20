@@ -1,2 +1,8 @@
 .pytest_cache
 plexus_core.egg-info
+examples/files_generated
+docs/build/*
+
+plexus_core/__pycache__/
+example/__pycache__/
+tests/__pycache__/

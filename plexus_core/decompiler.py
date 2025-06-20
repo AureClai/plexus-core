@@ -3,129 +3,178 @@
 import ast
 import json
 
+REVERSE_BINOP_MAP = {
+    ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/",
+}
+REVERSE_CMPOP_MAP = {
+    ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<",
+    ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">=",
+}
+
 
 class JSONDecompiler(ast.NodeVisitor):
-    """
-    Walks a Python AST and converts it into a Plexus JSON graph representation.
-    """
+    """Walks a Python AST and converts it into a Plexus JSON graph representation."""
 
     def __init__(self):
-        # The graph structure we are building
         self.nodes = []
-        self.connections = []  # Reserved for future use if needed
-
-        # Tracks which node ID provides which variable
-        # e.g., {"my_var": "node-1"}
+        self.connections = []
         self.variable_providers = {}
-
-        # Tracks which AST expression nodes correspond to which Plexus node IDs
-        # This is for linking expressions (like a BinOp) to their usage
         self.expression_map = {}
-
         self._node_count = 0
 
     def _get_unique_id(self, prefix='node'):
-        """
-        Generates a unique ID for a new node.
-        """
         self._node_count += 1
         return f"{prefix}-{self._node_count}"
 
-    def visit(self, node):
-        """Override the default visit to handle statement-level nodes."""
-        # The default visit traverses the whole tree. We want to walk
-        # through the body of a module statement by statement.
-        if isinstance(node, ast.Module):
-            for stmt in node.body:
-                self.visit(stmt)
-        else:
-            super().visit(node)
-
-    def _create_input_from_ast(self, value_node: ast.AST) -> dict:
-        """
-        Analyzes an AST value node (like a Name or Constant) and creates
-        the corresponding Plexus input link or literal value.
-        """
+    def _get_input_data_from_ast(self, value_node: ast.AST) -> dict:
+        """Analyzes an AST value node and returns the core of an input dict."""
         if isinstance(value_node, ast.Constant):
-            # It's a literal value like 5 or "hello"
-            # We use repr() to get the source-code representation
-            return {"name": "value", "value": repr(value_node.value)}
-
+            return {"value": repr(value_node.value)}
         elif isinstance(value_node, ast.Name):
-            # It's a variable. We need to find who provides it.
             var_name = value_node.id
             if var_name in self.variable_providers:
-                provider_node_id = self.variable_providers[var_name]
-                return {"name": "target", "link": provider_node_id}
+                return {"link": self.variable_providers[var_name]}
             else:
                 raise NameError(
                     f"Variable '{var_name}' used before assignment.")
+        # FIX: Explicitly handle collection literals by unparsing them.
+        elif isinstance(value_node, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
+            return {"value": ast.unparse(value_node)}
         else:
-            # It's a more complex expression (like BinOp or Compare).
-            # We need to recursively visit it to generate its node first.
             if value_node not in self.expression_map:
-                self.visit(value_node)  # This will populate expression_map
+                self.visit(value_node)
+            return {"link": self.expression_map.get(value_node)}
 
-            expr_node_id = self.expression_map[value_node]
-            return {"name": "value", "link": expr_node_id}
+    def _decompile_body(self, body_nodes: list) -> list:
+        original_nodes_list = self.nodes
+        self.nodes = []
+        for stmt in body_nodes:
+            self.visit(stmt)
+        newly_added_nodes = self.nodes
+        self.nodes = original_nodes_list
+        return newly_added_nodes
+
+    def visit(self, node):
+        method = 'visit_' + node.__class__.__name__
+        visitor = getattr(self, method, self.generic_visit)
+        return visitor(node)
+
+    def generic_visit(self, node):
+        super().generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign):
-        """Called when visiting a variable assignment (e.g., x = 10)."""
-        # For simplicity, we only handle single assignments like 'x = ...'
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            return  # Skip complex assignments like x, y = 1, 2
-        var_name = node.targets[0].id
+        if len(node.targets) != 1:
+            raise NotImplementedError(
+                "Unsupported syntax: Assignment to multiple targets is not supported.")
+        target = node.targets[0]
+        if isinstance(target, (ast.Tuple, ast.List)):
+            raise NotImplementedError(
+                "Unsupported syntax: Assignment to multiple targets is not supported.")
+        if not isinstance(target, ast.Name):
+            raise NotImplementedError(
+                "Unsupported syntax: Assignment to non-variable targets is not supported.")
+        var_name = target.id
         node_id = self._get_unique_id("assign")
-
-        plexus_node = {
-            "id": node_id,
-            "type": "variable_assign",
-            "value": var_name,
-            "inputs": [self._create_input_from_ast(node.value)]
-        }
-
+        input_data = self._get_input_data_from_ast(node.value)
+        input_data['name'] = 'value'
+        plexus_node = {"id": node_id, "type": "variable_assign",
+                       "value": var_name, "inputs": [input_data]}
         self.nodes.append(plexus_node)
-        # Record that this node ID is now the provider for this variable
         self.variable_providers[var_name] = node_id
 
     def visit_Expr(self, node: ast.Expr):
-        """Called for expressions used as statements, like a print() call."""
-        # We only care if the expression is a function call to 'print'
-        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
-            if node.value.func.id == 'print':
-                # This is a print statement, delegate to a print visitor
-                self.visit_Print(node.value)
+        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name) and node.value.func.id == 'print':
+            self.visit_Print(node.value)
+        else:
+            self.generic_visit(node)
 
-        # Continue traversing in case there are nested expressions to handle
-        self.generic_visit(node)
-
-    def visit_Print(self, node: ast.Call):
-        """A custom visitor for print() calls."""
-        if len(node.args) != 1:
-            return  # Skip print calls with zero or more than one argument
-
-        node_id = self._get_unique_id("print")
-
-        plexus_node = {
-            "id": node_id,
-            "type": "print",
-            "inputs": [self._create_input_from_ast(node.args[0])]
-        }
-
+    def visit_If(self, node: ast.If):
+        node_id = self._get_unique_id("if")
+        self.visit(node.test)
+        test_input = self._get_input_data_from_ast(node.test)
+        test_input['name'] = 'test'
+        body_plexus_nodes = self._decompile_body(node.body)
+        orelse_plexus_nodes = self._decompile_body(node.orelse)
+        plexus_node = {"id": node_id, "type": "if_statement", "inputs": [
+            test_input], "body": body_plexus_nodes, "orelse": orelse_plexus_nodes}
         self.nodes.append(plexus_node)
 
-    def get_graph(self) -> dict:
-        """Returns the final, constructed JSON graph."""
-        return {
-            "nodes": self.nodes,
-            "connections": self.connections
+    def visit_For(self, node: ast.For):
+        if node.orelse:
+            raise NotImplementedError("For/else loops are not supported.")
+        if not isinstance(node.target, ast.Name):
+            raise NotImplementedError(
+                "Looping with complex targets (e.g., for x, y in ...)")
+
+        node_id = self._get_unique_id("for_loop")
+        target_var_name = node.target.id
+        self.visit(node.iter)
+        iter_input = self._get_input_data_from_ast(node.iter)
+        iter_input['name'] = 'iter'
+        previous_provider = self.variable_providers.get(target_var_name)
+        self.variable_providers[target_var_name] = node_id
+        body_plexus_nodes = self._decompile_body(node.body)
+        if previous_provider:
+            self.variable_providers[target_var_name] = previous_provider
+        else:
+            del self.variable_providers[target_var_name]
+        plexus_node = {
+            "id": node_id, "type": "for_loop", "target_variable": target_var_name,
+            "inputs": [iter_input], "body": body_plexus_nodes
         }
+        self.nodes.append(plexus_node)
+
+    def visit_Print(self, node: ast.Call):
+        if len(node.args) != 1:
+            raise NotImplementedError(
+                f"Unsupported syntax: print() calls with {len(node.args)} arguments are not supported.")
+        node_id = self._get_unique_id("print")
+        input_data = self._get_input_data_from_ast(node.args[0])
+        input_data['name'] = 'target'
+        plexus_node = {"id": node_id, "type": "print", "inputs": [input_data]}
+        self.nodes.append(plexus_node)
+
+    def visit_BinOp(self, node: ast.BinOp):
+        self.visit(node.left)
+        self.visit(node.right)
+        node_id = self._get_unique_id("op")
+        op_class = type(node.op)
+        if op_class not in REVERSE_BINOP_MAP:
+            return self.generic_visit(node)
+        op_str = REVERSE_BINOP_MAP[op_class]
+        left_input = self._get_input_data_from_ast(node.left)
+        left_input['name'] = 'left'
+        right_input = self._get_input_data_from_ast(node.right)
+        right_input['name'] = 'right'
+        plexus_node = {"id": node_id, "type": "binary_op",
+                       "value": op_str, "inputs": [left_input, right_input]}
+        self.nodes.append(plexus_node)
+        self.expression_map[node] = node_id
+
+    def visit_Compare(self, node: ast.Compare):
+        self.visit(node.left)
+        self.visit(node.comparators[0])
+        if len(node.ops) != 1:
+            return self.generic_visit(node)
+        node_id = self._get_unique_id("op")
+        op_class = type(node.ops[0])
+        if op_class not in REVERSE_CMPOP_MAP:
+            return self.generic_visit(node)
+        op_str = REVERSE_CMPOP_MAP[op_class]
+        left_input = self._get_input_data_from_ast(node.left)
+        left_input['name'] = 'left'
+        right_input = self._get_input_data_from_ast(node.comparators[0])
+        right_input['name'] = 'right'
+        plexus_node = {"id": node_id, "type": "binary_op",
+                       "value": op_str, "inputs": [left_input, right_input]}
+        self.nodes.append(plexus_node)
+        self.expression_map[node] = node_id
+
+    def get_graph(self) -> dict:
+        return {"nodes": self.nodes, "connections": self.connections}
 
 
 def decompile_python_to_json(python_code: str) -> dict:
-    """
-    High-level function to decompile a Python code string to a Plexus JSON graph.
-    """
     try:
         ast_tree = ast.parse(python_code)
     except SyntaxError as e:

@@ -1,0 +1,64 @@
+{
+  "nodes": [
+    {
+      "id": "assign_age",
+      "type": "variable_assign",
+      "value": "age",
+      "inputs": [
+        {
+          "name": "value",
+          "value": "21"
+        }
+      ]
+    },
+    {
+      "id": "compare_age",
+      "type": "binary_op",
+      "value": ">=",
+      "inputs": [
+        {
+          "name": "left",
+          "link": "assign_age"
+        },
+        {
+          "name": "right",
+          "value": "18"
+        }
+      ]
+    },
+    {
+      "id": "if_adult",
+      "type": "if_statement",
+      "inputs": [
+        {
+          "name": "test",
+          "link": "compare_age"
+        }
+      ],
+      "body": [
+        {
+          "id": "print_welcome",
+          "type": "print",
+          "inputs": [
+            {
+              "name": "target",
+              "value": "'You are welcome to enter.'"
+            }
+          ]
+        }
+      ],
+      "orelse": [
+        {
+          "id": "print_deny",
+          "type": "print",
+          "inputs": [
+            {
+              "name": "target",
+              "value": "'You are too young.'"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
