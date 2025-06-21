@@ -17,8 +17,7 @@ class ASTCompiler:
         self.graph = graph_json
         self.node_map = {}
         if 'nodes' not in self.graph or not isinstance(self.graph['nodes'], list):
-            raise ValueError(
-                "Input JSON must contain a 'nodes' key with a list of nodes.")
+            raise ValueError("Input JSON must contain a 'nodes' key with a list of nodes.")
         self._discover_nodes(self.graph.get('nodes', []))
         self.expression_cache = {}
         self.compiled_statements = set()
@@ -35,8 +34,7 @@ class ASTCompiler:
                 if node.get('orelse'):
                     self._discover_nodes(node['orelse'])
             except KeyError:
-                raise ValueError(
-                    f"A node in the graph is missing a required 'id' field. Node data: {node}")
+                raise ValueError(f"A node in the graph is missing a required 'id' field. Node data: {node}")
 
     def _get_input_as_ast(self, input_data: dict) -> ast.expr:
         if 'link' in input_data:
@@ -53,65 +51,61 @@ class ASTCompiler:
             try:
                 return ast.parse(input_data['value'], mode='eval').body
             except (SyntaxError, IndexError):
-                raise ValueError(
-                    f"Could not parse literal value: {input_data['value']}")
+                raise ValueError(f"Could not parse literal value: {input_data['value']}")
         else:
-            raise ValueError(
-                f"Input dictionary is malformed. Must contain 'link' or 'value'. Got: {input_data}")
+            raise ValueError(f"Input dictionary is malformed. Must contain 'link' or 'value'. Got: {input_data}")
 
     def _build_expression(self, node: dict):
         node_id = node['id']
-        if node_id in self.expression_cache:
-            return
+        if node_id in self.expression_cache: return
 
         node_type = node.get('type')
-        if not node_type:
-            raise ValueError(f"Node '{node_id}' is missing a 'type' field.")
+        if not node_type: raise ValueError(f"Node '{node_id}' is missing a 'type' field.")
 
         def get_input(name: str) -> dict:
             for i in node.get('inputs', []):
-                if i.get('name') == name:
-                    return i
-            raise ValueError(
-                f"Node '{node_id}' of type '{node_type}' is missing required input: '{name}'")
-
+                if i.get('name') == name: return i
+            raise ValueError(f"Node '{node_id}' of type '{node_type}' is missing required input: '{name}'")
+        
         if node_type == 'variable_assign':
-            self.expression_cache[node_id] = ast.Name(
-                id=node['value'], ctx=ast.Load())
+            self.expression_cache[node_id] = ast.Name(id=node['value'], ctx=ast.Load())
         elif node_type == 'binary_op':
             op_str = node['value']
             left = self._get_input_as_ast(get_input('left'))
             right = self._get_input_as_ast(get_input('right'))
             if op_str in self.BINOP_MAP:
-                self.expression_cache[node_id] = ast.BinOp(
-                    left=left, op=self.BINOP_MAP[op_str](), right=right)
+                self.expression_cache[node_id] = ast.BinOp(left=left, op=self.BINOP_MAP[op_str](), right=right)
             elif op_str in self.CMPOP_MAP:
-                self.expression_cache[node_id] = ast.Compare(
-                    left=left, ops=[self.CMPOP_MAP[op_str]()], comparators=[right])
+                self.expression_cache[node_id] = ast.Compare(left=left, ops=[self.CMPOP_MAP[op_str]()], comparators=[right])
         elif node_type == 'call_function':
             func_name = node['func_name']
             func_ast = ast.Name(id=func_name, ctx=ast.Load())
             args = sorted(node.get('inputs', []), key=lambda i: i['name'])
             arg_asts = [self._get_input_as_ast(arg) for arg in args]
-            self.expression_cache[node_id] = ast.Call(
-                func=func_ast, args=arg_asts, keywords=[])
+            self.expression_cache[node_id] = ast.Call(func=func_ast, args=arg_asts, keywords=[])
 
     def _build_statement(self, node: dict) -> ast.stmt | None:
         node_id = node['id']
-        if node_id in self.compiled_statements:
-            return None
-
+        if node_id in self.compiled_statements: return None
+            
         node_type = node.get('type')
-        if not node_type:
+        if not node_type: 
             raise ValueError(f"Node '{node_id}' is missing a 'type' field.")
+
+        # If the decompiler marked this node as not being an intended top-level statement,
+        # we should ensure its expression is built (if it's an expression type)
+        # but not create a new statement from it in this loop.
+        # Default to True if the flag is missing, assuming it's a statement node.
+        if not node.get("is_intended_statement", True) and node_type in ['call_function', 'binary_op']:
+            if node_id not in self.expression_cache:
+                self._build_expression(node) # Ensure expression is built and cached
+            return None # Do not form a new top-level statement from this expression node
 
         def get_input(name: str) -> dict:
             for i in node.get('inputs', []):
-                if i.get('name') == name:
-                    return i
-            raise ValueError(
-                f"Node '{node_id}' of type '{node_type}' is missing required input: '{name}'")
-
+                if i.get('name') == name: return i
+            raise ValueError(f"Node '{node_id}' of type '{node_type}' is missing required input: '{name}'")
+        
         statement = None
         if node_type == 'variable_assign':
             self._build_expression(node)
@@ -119,50 +113,45 @@ class ASTCompiler:
             value = self._get_input_as_ast(get_input('value'))
             statement = ast.Assign(targets=[target], value=value)
         elif node_type == 'call_function':
-            self._build_expression(node)
-            statement = ast.Expr(value=self.expression_cache[node_id])
+            # This branch is now only reached if node.get("is_intended_statement") was True (or missing).
+            # This means the call_function node is intended as a standalone statement (e.g., print()).
+            if node_id not in self.expression_cache:
+                self._build_expression(node) # Ensure AST expression is cached
+            
+            if node_id not in self.expression_cache: # Should be populated by _build_expression
+                 raise RuntimeError(f"Expression for call_function node {node_id} not found in cache after building.")
+            call_ast_expr = self.expression_cache[node_id]
+            statement = ast.Expr(value=call_ast_expr)
         elif node_type == 'if_statement':
             test = self._get_input_as_ast(get_input('test'))
-            body = [stmt for n in node.get('body', []) if (
-                stmt := self._build_statement(n)) is not None]
-            orelse = [stmt for n in node.get('orelse', []) if (
-                stmt := self._build_statement(n)) is not None]
-            if not body:
-                body = [ast.Pass()]
+            body = [stmt for n in node.get('body', []) if (stmt := self._build_statement(n)) is not None]
+            orelse = [stmt for n in node.get('orelse', []) if (stmt := self._build_statement(n)) is not None]
+            if not body: body = [ast.Pass()]
             statement = ast.If(test=test, body=body, orelse=orelse)
         elif node_type == 'for_loop':
             target_var_name = node['target_variable']
             target_ast = ast.Name(id=target_var_name, ctx=ast.Store())
             iter_ast = self._get_input_as_ast(get_input('iter'))
-            body = [stmt for n in node.get('body', []) if (
-                stmt := self._build_statement(n)) is not None]
-            if not body:
-                body = [ast.Pass()]
-            statement = ast.For(target=target_ast,
-                                iter=iter_ast, body=body, orelse=[])
+            body = [stmt for n in node.get('body', []) if (stmt := self._build_statement(n)) is not None]
+            if not body: body = [ast.Pass()]
+            statement = ast.For(target=target_ast, iter=iter_ast, body=body, orelse=[])
 
         if statement:
             self.compiled_statements.add(node_id)
         return statement
 
     def compile(self) -> str:
+        # FIX: The compile loop must iterate over all top-level nodes,
+        # relying on _build_statement to handle dependencies and return None for
+        # non-statement nodes that have already been processed.
+        body = []
+        for node in self.graph['nodes']:
+            stmt = self._build_statement(node)
+            if stmt:
+                body.append(stmt)
+
         # FIX: Correctly initialize ast.Module for compatibility.
-        tree = ast.Module(body=[], type_ignores=[])
-
-        # FIX: Intelligently determine which nodes are top-level statements
-        linked_ids = set()
-        for node in self.graph['nodes']:
-            for an_input in node.get('inputs', []):
-                if 'link' in an_input:
-                    linked_ids.add(an_input['link'])
-
-        for node in self.graph['nodes']:
-            # A node is a top-level statement if nothing links to it.
-            if node['id'] not in linked_ids:
-                stmt = self._build_statement(node)
-                if stmt:
-                    tree.body.append(stmt)
-
+        tree = ast.Module(body=body, type_ignores=[])
         ast.fix_missing_locations(tree)
         return ast.unparse(tree)
 

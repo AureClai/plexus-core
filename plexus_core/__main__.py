@@ -5,37 +5,10 @@ import json
 import sys
 from .compiler import build_ast_from_json
 from .decompiler import decompile_python_to_json
-
+from .tools.drawio_generator import generate_drawio_xml_from_json
 
 def main():
-    """Provides the command-line interface for the plexus-core package.
-
-    This function sets up and parses command-line arguments using `argparse`
-    to allow users to compile and decompile files directly from the terminal.
-    It orchestrates the reading of input files, calling the core library
-    functions, and writing the output to the specified file or printing it
-    to the standard output.
-
-    The CLI supports two main commands:
-    - `compile`: Converts a Plexus JSON graph into a Python script.
-    - `decompile`: Converts a Python script into a Plexus JSON graph.
-
-    Error handling for file operations and library exceptions is also included.
-
-    .. rubric:: Usage Examples
-
-    .. code-block:: bash
-
-        # Decompile a script and print JSON to the console
-        python -m plexus_core decompile path/to/script.py
-
-        # Decompile a script and save the output to a file
-        python -m plexus_core decompile path/to/script.py -o graph.json
-
-        # Compile a graph and save the output to a script
-        python -m plexus_core compile path/to/graph.json -o script.py
-
-    """
+    """Provides the command-line interface for the plexus-core package."""
     parser = argparse.ArgumentParser(
         prog="plexus-core",
         description="A tool to compile and decompile between Python code and Plexus JSON graphs."
@@ -71,6 +44,21 @@ def main():
         help="The path to the output Python file. If omitted, prints to console."
     )
 
+    # --- New: Draw.io Export Command ---
+    parser_drawio = subparsers.add_parser(
+        "to-drawio",
+        help="Convert a Plexus JSON graph into a Draw.io XML file (.drawio)."
+    )
+    parser_drawio.add_argument(
+        "input_file",
+        help="The path to the input Plexus JSON file."
+    )
+    parser_drawio.add_argument(
+        "-o", "--output",
+        help="The path to the output .drawio file. If omitted, prints to console."
+    )
+
+
     args = parser.parse_args()
 
     try:
@@ -84,8 +72,8 @@ def main():
             if args.output:
                 with open(args.output, 'w') as f:
                     json.dump(graph, f, indent=2)
-                print(
-                    f"✅ Success! Graph saved to {args.soutput}", file=sys.stderr)
+                # FIX: Corrected the typo from 'soutput' to 'output'
+                print(f"✅ Success! Graph saved to {args.output}", file=sys.stderr)
             else:
                 # Pretty-print JSON to the console
                 print(json.dumps(graph, indent=2))
@@ -100,14 +88,27 @@ def main():
             if args.output:
                 with open(args.output, 'w') as f:
                     f.write(python_code)
-                print(
-                    f"✅ Success! Code saved to {args.output}", file=sys.stderr)
+                print(f"✅ Success! Code saved to {args.output}", file=sys.stderr)
             else:
                 print(python_code)
 
+        elif args.command == "to-drawio":
+            print(f"-> Converting {args.input_file} to Draw.io XML...", file=sys.stderr)
+            with open(args.input_file, 'r') as f:
+                graph = json.load(f)
+            
+            xml_output = generate_drawio_xml_from_json(graph)
+
+            if args.output:
+                with open(args.output, 'w') as f:
+                    f.write(xml_output)
+                print(f"✅ Success! Draw.io file saved to {args.output}", file=sys.stderr)
+            else:
+                print(xml_output)
+
+
     except FileNotFoundError:
-        print(
-            f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)
+        print(f"Error: Input file not found at '{args.input_file}'", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)
