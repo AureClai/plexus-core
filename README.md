@@ -99,6 +99,23 @@ print("--- Generated JSON Graph ---")
 print(json.dumps(graph, indent=2))
 ```
 
+### Example 3: Inspecting a module
+
+```python
+from plexus_core import generate_nodes_from_module_name
+import json
+import math
+
+# Generate node definitions from the built-in 'math' module
+math_nodes = generate_nodes_from_module_name("math")
+
+# Find the definition for the 'sin' function
+sin_node_def = next(n for n in math_nodes if n['func_name'] == 'sin')
+
+print("--- Inspected Node Definition for 'math.sin' ---")
+print(json.dumps(sin_node_def, indent=2))
+```
+
 ## 🧑‍💻 Development & Testing
 
 To contribute or run the tests locally, please follow these steps.
@@ -135,55 +152,14 @@ pytest
 
 This project is licensed under the MIT License.
 
-## Roadmap for Polishing `plexus-core`
+## 🗺️ Project Roadmap
+The core engine is now feature-rich and stable. The next steps will focus on refining the existing feature set and preparing for integration into a larger application.
 
-**Objective:** To enchance the feature set, robustness, and quality of the `plexus-core`library, ensuring it is production-ready.
-
-### ✅ Phase 1: Core Engine (Initial Version) - Completed
-
-- [x] Bi-directional compiler/decompiler structure.
-- [x] Support for variables, print, math/comparison, and basic if/else.
-- [x] Full test suite for core functionality and consistency.
-- [x] Executable CLI via python -m plexus_core.
-- [x] Professional documentation (README.md) and examples.
-
-### 🏃 Phase 1.5: Polishing the Core (Current Focus)
-
-This phase focuses on maturing the existing engine.
-
-#### Stage 1: Solidifying Existing Features (High Priority)
-
-- [x] **Full `if/elif/else` Decompiler Support:**
-  - Our current visit_If decompiler handles simple if/else cases. We need to upgrade it to correctly parse:
-    - `if` statements without an else block.
-    - `elif` clauses (which are represented in the AST as a nested if statement in the `orelse` block of the parent if).
-- [x] **Enhanced Error Handling & Validation:**
-  - Improve the compiler's error messages for malformed JSON. Instead of a generic KeyError, raise a descriptive ValueError (e.g., "Node 'node-5' of type 'print' is missing required 'inputs' field.").
-  - Add checks in the decompiler for unsupported Python syntax, providing a clear message to the user instead of failing silently.
-
-#### Stage 2: Expanding Node Support (Medium Priority)
-
-- [ ] **Loop Support: for Loops:**
-
-  - This is the most important feature for making the tool practically useful.
-  - JSON Definition: Define a for_loop node type (e.g., { "type": "for_loop", "target": "item", "iter_link": "my_list_node", "body": [...] }).
-  - Compiler: Implement the ast.For node generation.
-  - Decompiler: Implement the visit_For method to parse for loops back into the JSON graph.
-
-- [ ] **Generic Function Calls:**
-
-  - Right now, we only explicitly handle print(). We should generalize this.
-  - JSON Definition: Create a call_function node type (e.g., { "type": "call_function", "func_name": "my_func", "inputs": [...] }).
-  - Compiler/Decompiler: Update the logic to handle generating and parsing generic ast.Call nodes.
-
-#### Stage 3: Advanced Features & Refinements (Future Polish)
-
-- [ ] **Function Definition Support:**
-
-  - Allow users to define their own functions within the graph.
-  - JSON Definition: This would require a function_def node containing a name, arguments, and a body of nodes.
-  - Decompiler: This is a significant challenge, as it requires more advanced scope management in the variable_providers map.
-
-- [ ] **Comprehensive Docstrings & Code Comments:**
-
-  - Perform a full pass over compiler.py and decompiler.py to add detailed docstrings to all methods and clarify complex logical blocks with inline comments. This greatly improves long-term maintainability.
+- [x] Full if/elif/else Decompiler Support
+- [x] Enhanced Error Handling & Validation
+- [x] for Loop Support
+- [x] Generic Function Call Support
+- [x] Module Introspection for Node Generation
+- [ ] Function Definition Support: Allow users to define their own functions within the graph.
+- [ ] Comprehensive Docstrings: Perform a final pass to add detailed docstrings to all methods.
+- [ ] Phase 2 - API Layer: Begin development of a Flask/FastAPI wrapper to expose the engine's functionality over HTTP.
