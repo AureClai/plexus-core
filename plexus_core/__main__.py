@@ -44,20 +44,6 @@ def main():
         help="The path to the output Python file. If omitted, prints to console."
     )
 
-    # --- New: Draw.io Export Command ---
-    parser_drawio = subparsers.add_parser(
-        "to-drawio",
-        help="Convert a Plexus JSON graph into a Draw.io XML file (.drawio)."
-    )
-    parser_drawio.add_argument(
-        "input_file",
-        help="The path to the input Plexus JSON file."
-    )
-    parser_drawio.add_argument(
-        "-o", "--output",
-        help="The path to the output .drawio file. If omitted, prints to console."
-    )
-
 
     args = parser.parse_args()
 
@@ -91,20 +77,6 @@ def main():
                 print(f"✅ Success! Code saved to {args.output}", file=sys.stderr)
             else:
                 print(python_code)
-
-        elif args.command == "to-drawio":
-            print(f"-> Converting {args.input_file} to Draw.io XML...", file=sys.stderr)
-            with open(args.input_file, 'r') as f:
-                graph = json.load(f)
-            
-            xml_output = generate_drawio_xml_from_json(graph)
-
-            if args.output:
-                with open(args.output, 'w') as f:
-                    f.write(xml_output)
-                print(f"✅ Success! Draw.io file saved to {args.output}", file=sys.stderr)
-            else:
-                print(xml_output)
 
 
     except FileNotFoundError:
