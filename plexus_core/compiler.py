@@ -83,29 +83,24 @@ class ASTCompiler:
             args = sorted(node.get('inputs', []), key=lambda i: i['name'])
             arg_asts = [self._get_input_as_ast(arg) for arg in args]
             self.expression_cache[node_id] = ast.Call(func=func_ast, args=arg_asts, keywords=[])
+        # NEW: Handle subscript access
+        elif node_type == 'subscript_access':
+            value_ast = self._get_input_as_ast(get_input('value'))
+            slice_ast = self._get_input_as_ast(get_input('slice'))
+            self.expression_cache[node_id] = ast.Subscript(value=value_ast, slice=slice_ast, ctx=ast.Load())
 
     def _build_statement(self, node: dict) -> ast.stmt | None:
         node_id = node['id']
         if node_id in self.compiled_statements: return None
             
         node_type = node.get('type')
-        if not node_type: 
-            raise ValueError(f"Node '{node_id}' is missing a 'type' field.")
-
-        # If the decompiler marked this node as not being an intended top-level statement,
-        # we should ensure its expression is built (if it's an expression type)
-        # but not create a new statement from it in this loop.
-        # Default to True if the flag is missing, assuming it's a statement node.
-        if not node.get("is_intended_statement", True) and node_type in ['call_function', 'binary_op']:
-            if node_id not in self.expression_cache:
-                self._build_expression(node) # Ensure expression is built and cached
-            return None # Do not form a new top-level statement from this expression node
+        if not node_type: raise ValueError(f"Node '{node_id}' is missing a 'type' field.")
 
         def get_input(name: str) -> dict:
             for i in node.get('inputs', []):
                 if i.get('name') == name: return i
             raise ValueError(f"Node '{node_id}' of type '{node_type}' is missing required input: '{name}'")
-        
+
         statement = None
         if node_type == 'variable_assign':
             self._build_expression(node)
@@ -113,15 +108,8 @@ class ASTCompiler:
             value = self._get_input_as_ast(get_input('value'))
             statement = ast.Assign(targets=[target], value=value)
         elif node_type == 'call_function':
-            # This branch is now only reached if node.get("is_intended_statement") was True (or missing).
-            # This means the call_function node is intended as a standalone statement (e.g., print()).
-            if node_id not in self.expression_cache:
-                self._build_expression(node) # Ensure AST expression is cached
-            
-            if node_id not in self.expression_cache: # Should be populated by _build_expression
-                 raise RuntimeError(f"Expression for call_function node {node_id} not found in cache after building.")
-            call_ast_expr = self.expression_cache[node_id]
-            statement = ast.Expr(value=call_ast_expr)
+            self._build_expression(node)
+            statement = ast.Expr(value=self.expression_cache[node_id])
         elif node_type == 'if_statement':
             test = self._get_input_as_ast(get_input('test'))
             body = [stmt for n in node.get('body', []) if (stmt := self._build_statement(n)) is not None]
@@ -141,17 +129,20 @@ class ASTCompiler:
         return statement
 
     def compile(self) -> str:
-        # FIX: The compile loop must iterate over all top-level nodes,
-        # relying on _build_statement to handle dependencies and return None for
-        # non-statement nodes that have already been processed.
-        body = []
-        for node in self.graph['nodes']:
-            stmt = self._build_statement(node)
-            if stmt:
-                body.append(stmt)
+        tree = ast.Module(body=[], type_ignores=[])
+        
+        linked_ids = set()
+        for node in self.node_map.values():
+            for an_input in node.get('inputs', []):
+                if 'link' in an_input:
+                    linked_ids.add(an_input['link'])
 
-        # FIX: Correctly initialize ast.Module for compatibility.
-        tree = ast.Module(body=body, type_ignores=[])
+        for node in self.graph['nodes']:
+            if node['id'] not in linked_ids:
+                stmt = self._build_statement(node)
+                if stmt:
+                    tree.body.append(stmt)
+                    
         ast.fix_missing_locations(tree)
         return ast.unparse(tree)
 
