@@ -5,7 +5,6 @@ import json
 import sys
 from .compiler import build_ast_from_json
 from .decompiler import decompile_python_to_json
-from .tools.drawio_generator import generate_drawio_xml_from_json
 
 def main():
     """Provides the command-line interface for the plexus-core package."""
