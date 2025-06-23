@@ -1,5 +1,7 @@
 # plexus-core 🧩
 
+<p align="center"><img src="/home/runner/work/plexus-core/plexus-core/img/logo.png" alt="plexus-core logo" width="300"></p>
+
 **A powerful Python library for bi-directional translation between Python code and a JSON node graph.**
 
 [![PyPI version](https://img.shields.io/pypi/v/plexus-core.svg)](https://pypi.org/project/plexus-core/)
