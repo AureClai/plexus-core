@@ -1,6 +1,6 @@
 # plexus-core 🧩
 
-<p align="center"><img src="https://github.com/AureClai/plexus-core/tree/main/img/logo.png" alt="plexus-core logo" width="300"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/AureClai/plexus-core/refs/heads/main/img/logo.png" alt="plexus-core logo" width="300"></p>
 
 **A powerful Python library for bi-directional translation between Python code and a JSON node graph.**
 
